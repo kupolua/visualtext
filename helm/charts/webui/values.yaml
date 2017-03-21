@@ -14,10 +14,9 @@ env:
   gitrepourl: "https://github.com/agapeteo/visualtext.git"
   gitbranch: "master"
   gitreposynctime: "10"
-  resolver: "10.3.0.10"
   webuihost: api.default.svc.cluster.local
   webuiport: "8080"
-  resolver: "10.0.0.10"
+  resolver: "10.3.0.10"
 service:
   name: webui-port
   type: LoadBalancer

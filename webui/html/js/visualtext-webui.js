@@ -6,6 +6,10 @@ var WEBUI_CONFIG = {
     searchElementID: 'searchText',
     regex: '/\n/g',
     pattern: ' ',
+    bySpace: ' ',
+    numberWordsInBlock: 10,
+    maxWords: 1000,
+    maxWordsExceptionMessage: 'You can\'t send more then 1000 words.',
     exceptionID: 'exception',
     exceptionMessage: 'Request is empty or could not get data from ',
     picturesGalleryID: 'picturesGallery',
@@ -86,6 +90,7 @@ function TextHandler() {
     };
     this.getText = function() {
       this.getSearchTextByElementId();
+      this.splitTextIntoBlocks();
 
       return this.text;
     };
@@ -104,10 +109,45 @@ function TextHandler() {
 
       this.text = text;
     };
+    this.splitTextIntoBlocks = function() {
+        var splitedTextBySpace = this.text.split(WEBUI_CONFIG.html.bySpace),
+            wordsBoxMap = new Map,
+            initBoxNumber = 0,
+            wordsBox = [];
+
+        console.log('splitedTextBySpace: ' + splitedTextBySpace);
+
+        // try {
+        //     if(splitedTextBySpace.length > WEBUI_CONFIG.html.maxWords) {
+        //         throw new RangeError(WEBUI_CONFIG.html.maxWordsExceptionMessage);
+        //     }
+
+            splitedTextBySpace.forEach(function (word, i) {
+                if(!(i % WEBUI_CONFIG.html.numberWordsInBlock) && i > 0) {
+                    wordsBoxMap.set(initBoxNumber, wordsBox);
+                    initBoxNumber++;
+                    wordsBox = [];
+                }
+
+                wordsBox[i] = word;
+            });
+
+            wordsBoxMap.set(initBoxNumber, wordsBox);
+
+            console.log('initBoxNumber, wordsBox, wordsBoxMap: ', initBoxNumber, wordsBox, wordsBoxMap);
+            this.text = wordsBoxMap;
+            // this.text = wordsBoxMap.size > 0 ? wordsBoxMap : wordsBoxMap.set(initBoxNumber, wordsBox);
+        // } catch (e) {
+        //     var htmlResponseBuilder = new HTMLResponseBuilder();
+        //
+        //     htmlResponseBuilder.publish(e);
+        // }
+    };
   }).call(TextHandler.prototype);
 }
 
 function RequestBuilder() {
+  var requestsMap = [];
   this.protocol = WEBUI_CONFIG.http.protocol;
   this.host = WEBUI_CONFIG.http.host;
   this.port = WEBUI_CONFIG.http.port;
@@ -124,7 +164,7 @@ function RequestBuilder() {
       this.request.url = this.protocol + "//" + this.host + ":" + this.port + this.api_url;
     };
     this.buildData = function(text) {
-      this.request.data = '{"text":"' + text + '", "ignoreCache":false}';
+      this.request.data = '{"text":"' + text.join(' ') + '", "ignoreCache":false}';
     };
     this.getRequest = function(text) {
       this.buildUrl();
@@ -135,69 +175,59 @@ function RequestBuilder() {
   }).call(RequestBuilder.prototype);
 }
 
-function NetworkTransporter() {
-  var spinner;
-  var spinnerOpts = WEBUI_CONFIG.spinner.spinnerOpts;
-  var spinnerTargetAnchorID = WEBUI_CONFIG.spinner.spinnerAnchorID;
-  var spinnerTargetAnchor = document.getElementById(spinnerTargetAnchorID);
+function SpinnerHandler() {
+    this.spinner;
+    this.spinnerOpts = WEBUI_CONFIG.spinner.spinnerOpts;
+    this.spinnerTargetAnchorID = WEBUI_CONFIG.spinner.spinnerAnchorID;
+    this.spinnerTargetAnchor = document.getElementById(this.spinnerTargetAnchorID);
 
-  (function() {
-    this.send = function(request, callback) {
+    (function () {
+        this.run = function () {
+            this.spinner = new Spinner(this.spinnerOpts).spin(this.spinnerTargetAnchor);
+        };
+        this.stop = function () {
+            this.spinner.stop(this.spinnerTargetAnchor);
+        }
+    }).call(SpinnerHandler.prototype)
+}
+
+function NetworkTransporter() {
+    this.send = function(request, callback, wordsBoxID) {
       $.ajax({
         type: request.type,
         url: request.url,
         contentType: request.contentType,
         data: request.data,
-        beforeSend: function(){
-          spinner = new Spinner(spinnerOpts).spin(spinnerTargetAnchor);
-        },
-        complete: function(){
-          spinner.stop(spinnerTargetAnchor);
-        },
         error: function(){
           var exceptionMessage = WEBUI_CONFIG.html.exceptionMessage + request.url;
 
-          callback.setResponse(exceptionMessage);
-          callback.publishResponse();
-
-          spinner.stop(spinnerTargetAnchor);
+          callback.publish(exceptionMessage, wordsBoxID);
         }
       }).then(function(data) {
-        callback.setResponse(data);
-        callback.publishResponse();
+        callback.publish(data, wordsBoxID);
       });
     };
-  }).call(NetworkTransporter.prototype);
 }
 
 function HTMLResponseBuilder() {
-  var buildImgTag = function(response, key, index) {
-    $("#" +index + " div .caption").text(response[key]['word']);
+  var buildImgTag = function(response, key, index, wordsBoxID) {
+    $("#" + wordsBoxID + '_' + index + " div .caption").text(response[key]['word']);
 
     if (response[key]['image'] === null) {
-      $("#" +index + " div img").remove();
-      $("<i class=\"fa fa-question-circle-o fa-7\" aria-hidden=\"true\" id=\"unknownWord\"></i>").insertBefore("#" +index + " .caption");
+      $("#" + wordsBoxID + '_' + index + " div img").remove();
+      $("<i class=\"fa fa-question-circle-o fa-7\" aria-hidden=\"true\" id=\"unknownWord\"></i>").insertBefore("#" + wordsBoxID + '_' + index + " .caption");
       $("#unknownWord").css("font", "normal normal normal 50px/1 FontAwesome");
     } else {
-      $("#" +index + " div img").attr("src", "data:image/gif;base64," + response[key]['image']);
+      $("#" + wordsBoxID + '_' + index + " div img").attr("src", "data:image/gif;base64," + response[key]['image']);
     }
   };
-  var scrollToID = function(id, speed){
-    var offSet = 50;
-    var targetOffset = $(id).offset().top - offSet;
-    $('html,body').animate({
-      scrollTop:targetOffset
-    }, speed);
-  };
   (function() {
-    this.publish = function(response) {
+    this.publish = function(response, wordsBoxID) {
       if (typeof response === 'object') {
         Object.keys(response).map(function(key, index) {
-          $("#thumbnailCard").clone().appendTo("#picturesGallery").attr("id", index);
-          buildImgTag(response, key, index);
+          $("#thumbnailCard").clone().appendTo("#picturesGallery-" + wordsBoxID).attr("id", wordsBoxID + '_' + index);
+          buildImgTag(response, key, index, wordsBoxID);
         });
-
-        scrollToID('#picturesGallery', 2000);
       } else {
         $(".exception").html(response).css("color", "red");
       }
@@ -208,7 +238,7 @@ function HTMLResponseBuilder() {
 function VisualTextController() {
   this.text = '';
   this.textHandler = {};
-  this.request = {};
+  this.requestsMap = {};
   this.requestBuilder = {};
   this.transport = {};
   this.response = {};
@@ -224,19 +254,51 @@ function VisualTextController() {
       return this;
     };
     this.getRequest = function() {
-      var text = this.text;
+      var textMap = this.text,
+          requestsMap = new Map();
 
-      this.request = this.requestBuilder.getRequest(text);
+        console.log('textMap: ', textMap);
+
+        for(var i = 0; i < textMap.size; i++) {
+            var text = textMap.get(i),
+                requestBuilder = new RequestBuilder(),
+                request = requestBuilder.getRequest(text);
+
+            requestsMap.set(i, request);
+        }
+        console.log('requestsMap: ', requestsMap);
+
+        this.requestsMap = requestsMap;
+
+        console.log('this.requestsMap: ', this.requestsMap);
 
       return this;
     };
     this.sendRequest = function() {
-      var request = this.request;
-      var callback = this;
+        var spinner = new SpinnerHandler();
 
-      this.transport.send(request, callback);
+        spinner.run();
 
-      return this;
+        var requestsMap = this.requestsMap;
+
+        for(var i = 0; i < requestsMap.size; i++) {
+            var request = requestsMap.get(i),
+                callback = new HTMLResponseBuilder(),
+                wordsBoxID;
+
+            this.transport.send(request, callback, i);
+
+            wordsBoxID = i;
+
+            $("#picturesGallery").clone().appendTo("#pictures").attr("id", "picturesGallery-" + wordsBoxID);
+        }
+
+        scrollToID('#picturesGallery-' + wordsBoxID, 2000);
+        $("#picturesGallery").remove();
+
+        // spinner.stop();
+
+        return this;
     };
     this.setResponse = function(response) {
       this.response = response;
@@ -270,8 +332,8 @@ function VisualTextController() {
     };
     this.clearUI = function() {
       $("#picturesGallery div").remove();
-      var searchRequest = document.getElementById("searchText");
-      searchRequest.value = '';
+      // var searchRequest = document.getElementById("searchText");
+      // searchRequest.value = '';
 
       $(".exception").html('');
 
@@ -288,6 +350,14 @@ function VisualTextController() {
     }
   }).call(VisualTextController.prototype);
 }
+
+function scrollToID(id, speed){
+    var offSet = 50;
+    var targetOffset = $(id).offset().top - offSet;
+    $('html,body').animate({
+        scrollTop:targetOffset
+    }, speed);
+};
 
 document.addEventListener("DOMContentLoaded", function() {
   var textHandler = new TextHandler();
