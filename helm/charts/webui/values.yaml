@@ -11,11 +11,12 @@ imagenginxlua:
   pullPolicy: IfNotPresent
 env:
   webuipath: "webui/html"
-  gitrepourl: "https://github.com/agapeteo/visualtext.git"
-  gitbranch: "master"
-  webuihost: api.default.svc.cluster.local
+  gitrepourl: "https://github.com/kupolua/visualtext.git"
+  gitbranch: "develop"
+  apiName: api
+  clusterHost: svc.cluster.local
   webuiport: "8080"
-  resolver: "10.0.0.10"
+  resolver: "10.3.0.10"
 service:
   name: webui-port
   type: LoadBalancer
